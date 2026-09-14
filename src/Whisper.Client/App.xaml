@@ -1,0 +1,41 @@
+﻿<Application x:Class="Whisper.Client.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:infrastructure="clr-namespace:Whisper.Client.Infrastructure"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+             xmlns:viewModels="clr-namespace:Whisper.Client.ViewModels"
+             xmlns:views="clr-namespace:Whisper.Client.Views"
+             DispatcherUnhandledException="OnDispatcherUnhandledException">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ui:ThemesDictionary Theme="Dark" />
+                <ui:ControlsDictionary />
+            </ResourceDictionary.MergedDictionaries>
+
+            <Style x:Key="FieldLabelStyle" TargetType="ui:TextBlock">
+                <Setter Property="Margin" Value="2,0,0,4" />
+                <Setter Property="FontTypography" Value="Caption" />
+                <Setter Property="Foreground" Value="{DynamicResource TextFillColorSecondaryBrush}" />
+            </Style>
+
+            <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+            <infrastructure:NullToBooleanConverter x:Key="NullToBooleanConverter" />
+            <infrastructure:InverseBooleanConverter x:Key="InverseBooleanConverter" />
+            <infrastructure:EmptyToVisibilityConverter x:Key="EmptyToVisibilityConverter" />
+            <infrastructure:EqualityMultiConverter x:Key="EqualityMultiConverter" />
+
+            <DataTemplate DataType="{x:Type viewModels:ServerBrowserViewModel}">
+                <views:ServerBrowserView />
+            </DataTemplate>
+
+            <DataTemplate DataType="{x:Type viewModels:MainViewModel}">
+                <views:MainView />
+            </DataTemplate>
+
+            <DataTemplate DataType="{x:Type viewModels:SettingsViewModel}">
+                <views:SettingsView />
+            </DataTemplate>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

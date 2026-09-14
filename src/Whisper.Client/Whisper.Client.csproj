@@ -1,0 +1,45 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>Whisper.Client</RootNamespace>
+    <AssemblyName>Whisper</AssemblyName>
+    <Product>Whisper</Product>
+    <!--
+      Directory.Build.props turns invariant globalization on for the server. WPF bindings
+      call XmlLanguage.GetSpecificCulture(), which cannot resolve 'en-us' in that mode,
+      so the window never paints.
+    -->
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+
+  <!--
+    WPF cannot be trimmed, and XAML resource lookup needs the satellite assemblies, so
+    single-file publishing here is purely about shipping one executable.
+  -->
+  <PropertyGroup Condition="'$(PublishSingleFile)' == 'true'">
+    <PublishTrimmed>false</PublishTrimmed>
+    <SelfContained>true</SelfContained>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+    <PackageReference Include="Concentus" Version="2.2.2" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="9.0.2" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="9.0.2" />
+    <PackageReference Include="NAudio" Version="2.2.1" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="9.0.2" />
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Whisper.Shared\Whisper.Shared.csproj" />
+  </ItemGroup>
+
+</Project>
