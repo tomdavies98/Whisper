@@ -82,22 +82,32 @@ public sealed class NAudioOutput : IAudioOutput
         {
             output.PlaybackStopped -= OnPlaybackStopped;
 
-            try
+            var stop = Task.Run(() =>
             {
-                output.Stop();
-            }
-            catch (Exception)
-            {
-                // Device already gone.
-            }
+                try
+                {
+                    output.Stop();
+                }
+                catch (Exception)
+                {
+                    // Device already gone.
+                }
+            });
 
-            try
+            if (stop.Wait(TimeSpan.FromSeconds(2)))
             {
-                output.Dispose();
+                try
+                {
+                    output.Dispose();
+                }
+                catch (Exception)
+                {
+                    // WASAPI can throw from Dispose after a failed Stop.
+                }
             }
-            catch (Exception)
+            else
             {
-                // WASAPI can throw from Dispose after a failed Stop; the device is still gone.
+                Failed?.Invoke(this, new TimeoutException("Playback did not stop in time."));
             }
         }
 

@@ -39,6 +39,9 @@ public sealed partial class SettingsViewModel : ObservableObject
     [ObservableProperty]
     private string _statusMessage = string.Empty;
 
+    private bool _loading;
+    private bool _meterEnabled;
+
     public SettingsViewModel(
         IAudioDeviceProvider devices,
         IVoiceSession voice,
@@ -60,6 +63,14 @@ public sealed partial class SettingsViewModel : ObservableObject
     /// <summary>Latency added by the jitter buffer, so the trade-off is visible.</summary>
     public string JitterBufferLabel => $"{JitterBufferFrames * Whisper.Shared.AudioFormat.FrameMilliseconds} ms";
 
+    /// <summary>
+    /// Where the voice-activation threshold sits on the same 0..1 scale as the meter,
+    /// so a user can see whether their speech would open the gate.
+    /// </summary>
+    public float ThresholdMeterPosition => VoiceActivityGate.ToDisplayLevel(VoiceActivityThresholdDb);
+
+    public bool ShowThresholdMarker => !UsePushToTalk;
+
     public event EventHandler? Closed;
 
     /// <summary>
@@ -70,20 +81,48 @@ public sealed partial class SettingsViewModel : ObservableObject
     {
         var settings = _profileStore.Load().Audio;
 
-        RefreshDevicesCommand.Execute(null);
+        _loading = true;
+        _meterEnabled = false;
 
-        SelectedInputDevice = InputDevices.FirstOrDefault(d => d.Id == settings.InputDeviceId)
-            ?? InputDevices.FirstOrDefault(d => d.IsDefault)
-            ?? InputDevices.FirstOrDefault();
+        try
+        {
+            RefreshDevicesCommand.Execute(null);
 
-        SelectedOutputDevice = OutputDevices.FirstOrDefault(d => d.Id == settings.OutputDeviceId)
-            ?? OutputDevices.FirstOrDefault(d => d.IsDefault)
-            ?? OutputDevices.FirstOrDefault();
+            SelectedInputDevice = InputDevices.FirstOrDefault(d => d.Id == settings.InputDeviceId)
+                ?? InputDevices.FirstOrDefault(d => d.IsDefault)
+                ?? InputDevices.FirstOrDefault();
 
-        UsePushToTalk = settings.UsePushToTalk;
-        VoiceActivityThresholdDb = settings.VoiceActivityThresholdDb;
-        JitterBufferFrames = settings.JitterBufferFrames;
-        InputGain = settings.InputGain;
+            SelectedOutputDevice = OutputDevices.FirstOrDefault(d => d.Id == settings.OutputDeviceId)
+                ?? OutputDevices.FirstOrDefault(d => d.IsDefault)
+                ?? OutputDevices.FirstOrDefault();
+
+            UsePushToTalk = settings.UsePushToTalk;
+            VoiceActivityThresholdDb = settings.VoiceActivityThresholdDb;
+            JitterBufferFrames = settings.JitterBufferFrames;
+            InputGain = settings.InputGain;
+            InputLevel = 0;
+            ApplyDraftToVoice();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    /// <summary>
+    /// Opens the microphone after the settings page has rendered. Starting capture during
+    /// <see cref="Load"/> deadlocked the UI: WASAPI/WaveIn on the audio thread waited for
+    /// the STA dispatcher, which was still inside the navigation click.
+    /// </summary>
+    public async Task StartMeterAsync()
+    {
+        if (_meterEnabled)
+        {
+            return;
+        }
+
+        _meterEnabled = true;
+        await ListenAsync();
     }
 
     [RelayCommand]
@@ -126,17 +165,87 @@ public sealed partial class SettingsViewModel : ObservableObject
         _profileStore.Save(document);
         _voice.ApplySettings(document.Audio);
 
-        StatusMessage = _voice.IsActive
-            ? "Saved. Device changes take effect the next time you join a voice channel."
-            : "Saved.";
+        StatusMessage = "Saved. Speak to test the microphone.";
     }
 
     [RelayCommand]
-    private void Close()
+    private async Task CloseAsync()
     {
         Apply();
+
+        try
+        {
+            await _voice.StopInputMeterAsync();
+        }
+        catch (Exception)
+        {
+            // Closing settings must still return to the session.
+        }
+
         Closed?.Invoke(this, EventArgs.Empty);
     }
 
+    private void ApplyDraftToVoice() => _voice.ApplySettings(new AudioSettings
+    {
+        InputDeviceId = SelectedInputDevice?.Id,
+        OutputDeviceId = SelectedOutputDevice?.Id,
+        UsePushToTalk = UsePushToTalk,
+        PushToTalkKey = _voice.Settings.PushToTalkKey,
+        VoiceActivityThresholdDb = VoiceActivityThresholdDb,
+        JitterBufferFrames = JitterBufferFrames,
+        InputGain = InputGain,
+    });
+
+    private async Task ListenAsync()
+    {
+        try
+        {
+            await _voice.StartInputMeterAsync();
+        }
+        catch (Exception ex)
+        {
+            _ui.Post(() => StatusMessage = $"Could not open the microphone: {ex.Message}");
+        }
+    }
+
     partial void OnJitterBufferFramesChanged(int value) => OnPropertyChanged(nameof(JitterBufferLabel));
+
+    partial void OnVoiceActivityThresholdDbChanged(float value)
+    {
+        OnPropertyChanged(nameof(ThresholdMeterPosition));
+
+        if (!_loading)
+        {
+            ApplyDraftToVoice();
+        }
+    }
+
+    partial void OnUsePushToTalkChanged(bool value)
+    {
+        OnPropertyChanged(nameof(ShowThresholdMarker));
+
+        if (!_loading)
+        {
+            ApplyDraftToVoice();
+        }
+    }
+
+    partial void OnInputGainChanged(float value)
+    {
+        if (!_loading)
+        {
+            ApplyDraftToVoice();
+        }
+    }
+
+    partial void OnSelectedInputDeviceChanged(AudioDeviceInfo? value)
+    {
+        if (_loading || !_meterEnabled)
+        {
+            return;
+        }
+
+        ApplyDraftToVoice();
+        _ = ListenAsync();
+    }
 }

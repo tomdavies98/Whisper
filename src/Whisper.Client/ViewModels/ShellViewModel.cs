@@ -32,7 +32,11 @@ public sealed partial class ShellViewModel : ObservableObject
             CurrentView = Settings;
         };
 
-        Settings.Closed += (_, _) => CurrentView = Session;
+        Settings.Closed += (_, _) =>
+        {
+            Session.RefreshAudioPresentation();
+            CurrentView = Session;
+        };
     }
 
     public ServerBrowserViewModel Browser { get; }

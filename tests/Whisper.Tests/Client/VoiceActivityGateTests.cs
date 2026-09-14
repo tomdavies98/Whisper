@@ -121,4 +121,38 @@ public class VoiceActivityGateTests
         _gate.LastLevel.Should().Be(0f);
         _gate.Process(AudioSignals.Silence()).Should().BeFalse();
     }
+
+    [Fact]
+    public void ToDisplayLevel_MapsSilenceToTheLeftAndFullScaleToTheRight()
+    {
+        VoiceActivityGate.ToDisplayLevel(float.NegativeInfinity).Should().Be(0f);
+        VoiceActivityGate.ToDisplayLevel(-70f).Should().Be(0f);
+        VoiceActivityGate.ToDisplayLevel(-35f).Should().BeApproximately(0.5f, 0.001f);
+        VoiceActivityGate.ToDisplayLevel(0f).Should().Be(1f);
+    }
+
+    [Fact]
+    public void Process_UsesPeakForTheMeterSoQuietSpeechStillMovesIt()
+    {
+        _gate.Process(AudioSignals.Sine(amplitude: 0.003));
+
+        _gate.LastLevel.Should().BeGreaterThan(0.2f);
+        _gate.IsOpen.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Process_OpensWhenPeakCrossesTheConfiguredThreshold()
+    {
+        _gate.ThresholdDb = -40f;
+
+        _gate.Process(AudioSignals.Sine(amplitude: 0.02)).Should().BeTrue();
+    }
+
+    [Fact]
+    public void Process_StaysClosedWhenPeakIsBelowTheConfiguredThreshold()
+    {
+        _gate.ThresholdDb = -30f;
+
+        _gate.Process(AudioSignals.Sine(amplitude: 0.02)).Should().BeFalse();
+    }
 }

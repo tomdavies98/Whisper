@@ -266,7 +266,15 @@ internal sealed class FakeVoiceSession : IVoiceSession
 
     public int StopCalls { get; private set; }
 
+    public bool? LastReleaseDevices { get; private set; }
+
+    public int InputMeterStartCalls { get; private set; }
+
+    public int InputMeterStopCalls { get; private set; }
+
     public event EventHandler<float>? InputLevelChanged;
+
+    public event EventHandler<bool>? TransmittingChanged;
 
     public event EventHandler<Exception>? Failed;
 
@@ -284,6 +292,7 @@ internal sealed class FakeVoiceSession : IVoiceSession
     public Task StopAsync(bool releaseDevices = false)
     {
         StopCalls++;
+        LastReleaseDevices = releaseDevices;
         IsActive = false;
         return Task.CompletedTask;
     }
@@ -292,9 +301,27 @@ internal sealed class FakeVoiceSession : IVoiceSession
 
     public void SetPushToTalkPressed(bool isPressed) => IsTransmitting = isPressed && !IsMuted;
 
+    public Task StartInputMeterAsync(CancellationToken cancellationToken = default)
+    {
+        InputMeterStartCalls++;
+        return Task.CompletedTask;
+    }
+
+    public Task StopInputMeterAsync()
+    {
+        InputMeterStopCalls++;
+        return Task.CompletedTask;
+    }
+
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 
     public void RaiseFailed(Exception exception) => Failed?.Invoke(this, exception);
+
+    public void RaiseTransmittingChanged(bool transmitting)
+    {
+        IsTransmitting = transmitting;
+        TransmittingChanged?.Invoke(this, transmitting);
+    }
 
     public void RaiseInputLevel(float level)
     {

@@ -23,6 +23,9 @@ public interface IAudioCapture : IDisposable
     /// <summary>Raised once per 20 ms frame, on a capture thread rather than the UI thread.</summary>
     event EventHandler<short[]>? FrameCaptured;
 
+    /// <summary>Windows mixer peak 0..1 for the selected capture endpoint.</summary>
+    event EventHandler<float>? EndpointPeakChanged;
+
     /// <summary>Raised when the device fails or is removed mid-call.</summary>
     event EventHandler<Exception>? Failed;
 

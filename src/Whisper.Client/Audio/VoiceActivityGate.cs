@@ -27,8 +27,14 @@ public sealed class VoiceActivityGate(TimeProvider timeProvider)
 
     public bool Process(ReadOnlySpan<short> frame)
     {
-        LastLevelDb = MeasureDb(frame);
-        LastLevel = NormaliseLevel(LastLevelDb);
+        var rmsDb = MeasureDb(frame);
+        var peakDb = MeasurePeakDb(frame);
+        // Use the louder of RMS and peak so the dBFS threshold matches what the input
+        // meter shows. A peak-only spike still counts; steady speech is covered by RMS.
+        LastLevelDb = float.IsNegativeInfinity(rmsDb) ? peakDb
+            : float.IsNegativeInfinity(peakDb) ? rmsDb
+            : Math.Max(rmsDb, peakDb);
+        LastLevel = ToDisplayLevel(LastLevelDb);
 
         var now = timeProvider.GetUtcNow().UtcTicks;
 
@@ -70,7 +76,24 @@ public sealed class VoiceActivityGate(TimeProvider timeProvider)
         return rms <= 0 ? float.NegativeInfinity : (float)(20 * Math.Log10(rms));
     }
 
-    /// <summary>Maps -60..0 dBFS onto 0..1 for display.</summary>
-    private static float NormaliseLevel(float levelDb) =>
-        float.IsNegativeInfinity(levelDb) ? 0f : Math.Clamp((levelDb + 60f) / 60f, 0f, 1f);
+    public static float MeasurePeakDb(ReadOnlySpan<short> frame)
+    {
+        var peak = 0;
+        foreach (var sample in frame)
+        {
+            var magnitude = sample == short.MinValue ? short.MaxValue : Math.Abs(sample);
+            if (magnitude > peak)
+            {
+                peak = magnitude;
+            }
+        }
+
+        return peak <= 0 ? float.NegativeInfinity : (float)(20 * Math.Log10(peak / (double)short.MaxValue));
+    }
+
+    /// <summary>
+    /// Maps -70..0 dBFS onto 0..1. A floor of -60 left quiet headset mics looking dead.
+    /// </summary>
+    public static float ToDisplayLevel(float levelDb) =>
+        float.IsNegativeInfinity(levelDb) ? 0f : Math.Clamp((levelDb + 70f) / 70f, 0f, 1f);
 }

@@ -31,7 +31,8 @@ public partial class MainView : UserControl
     /// </summary>
     private void OnMessagesChanged(object? sender, NotifyCollectionChangedEventArgs e)
     {
-        if (e.Action != NotifyCollectionChangedAction.Add
+        if (!IsLoaded
+            || e.Action != NotifyCollectionChangedAction.Add
             || sender is not System.Collections.ICollection collection
             || e.NewStartingIndex != collection.Count - 1)
         {

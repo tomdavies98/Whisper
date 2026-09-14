@@ -50,6 +50,9 @@ public sealed class VoiceSession(
     private bool _pushToTalkPressed;
     private string? _openedInputId;
     private string? _openedOutputId;
+    private bool _metering;
+    private bool _captureHandlersAttached;
+    private float _endpointDisplay;
 
     public bool IsActive { get; private set; }
 
@@ -68,6 +71,8 @@ public sealed class VoiceSession(
     public AudioSettings Settings { get; private set; } = new();
 
     public event EventHandler<float>? InputLevelChanged;
+
+    public event EventHandler<bool>? TransmittingChanged;
 
     public event EventHandler<Exception>? Failed;
 
@@ -124,9 +129,7 @@ public sealed class VoiceSession(
 
         _keepaliveLoop = Task.Run(() => KeepaliveLoopAsync(transport, cancellation.Token), CancellationToken.None);
 
-        capture.FrameCaptured += OnFrameCaptured;
-        capture.Failed += OnDeviceFailed;
-        output.Failed += OnDeviceFailed;
+        AttachCaptureHandlers();
 
         try
         {
@@ -178,11 +181,19 @@ public sealed class VoiceSession(
             _keepaliveLoop = null;
             IsActive = false;
             IsTransmitting = false;
+
+            if (releaseDevices)
+            {
+                _metering = false;
+            }
         }
 
-        capture.FrameCaptured -= OnFrameCaptured;
-        capture.Failed -= OnDeviceFailed;
-        output.Failed -= OnDeviceFailed;
+        TransmittingChanged?.Invoke(this, false);
+
+        if (!_metering)
+        {
+            DetachCaptureHandlers();
+        }
 
         if (releaseDevices)
         {
@@ -253,24 +264,130 @@ public sealed class VoiceSession(
     {
         var inputId = Settings.InputDeviceId;
         var outputId = Settings.OutputDeviceId;
-        var alreadyOpen = capture.IsCapturing
-            && output.IsPlaying
-            && string.Equals(_openedInputId, inputId, StringComparison.Ordinal)
-            && string.Equals(_openedOutputId, outputId, StringComparison.Ordinal);
+        var restartOutput = !output.IsPlaying
+            || !string.Equals(_openedOutputId, outputId, StringComparison.Ordinal);
+        var restartInput = !capture.IsCapturing
+            || !string.Equals(_openedInputId, inputId, StringComparison.Ordinal);
 
-        if (alreadyOpen)
+        if (!restartOutput && !restartInput)
         {
             return;
         }
 
-        await audioThread.InvokeAsync(() =>
+        if (restartOutput)
         {
-            output.Start(outputId, _mixer);
-            capture.Start(inputId);
-        }, cancellationToken).ConfigureAwait(false);
+            await audioThread.InvokeAsync(() => output.Start(outputId, _mixer), cancellationToken)
+                .ConfigureAwait(false);
+            _openedOutputId = outputId;
+        }
 
+        if (restartInput)
+        {
+            await Task.Run(() => capture.Start(inputId), cancellationToken).ConfigureAwait(false);
+            _openedInputId = inputId;
+        }
+    }
+
+    public async Task StartInputMeterAsync(CancellationToken cancellationToken = default)
+    {
+        await _run.WaitAsync(cancellationToken).ConfigureAwait(false);
+
+        try
+        {
+            _metering = true;
+            AttachCaptureHandlers();
+            await EnsureCaptureAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Could not open the microphone for the input meter.");
+            _metering = false;
+
+            if (!IsActive)
+            {
+                DetachCaptureHandlers();
+            }
+
+            Failed?.Invoke(this, ex);
+            throw;
+        }
+        finally
+        {
+            _run.Release();
+        }
+    }
+
+    public async Task StopInputMeterAsync()
+    {
+        await _run.WaitAsync().ConfigureAwait(false);
+
+        try
+        {
+            _metering = false;
+            InputLevel = 0;
+            _endpointDisplay = 0;
+            InputLevelChanged?.Invoke(this, 0f);
+
+            if (!IsActive)
+            {
+                DetachCaptureHandlers();
+
+                try
+                {
+                    await Task.Run(() => capture.Stop()).ConfigureAwait(false);
+                    _openedInputId = null;
+                }
+                catch (Exception ex)
+                {
+                    logger.LogDebug(ex, "Could not release the microphone after settings.");
+                }
+            }
+        }
+        finally
+        {
+            _run.Release();
+        }
+    }
+
+    private async Task EnsureCaptureAsync(CancellationToken cancellationToken)
+    {
+        var inputId = Settings.InputDeviceId;
+
+        if (capture.IsCapturing && string.Equals(_openedInputId, inputId, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        await Task.Run(() => capture.Start(inputId), cancellationToken).ConfigureAwait(false);
         _openedInputId = inputId;
-        _openedOutputId = outputId;
+    }
+
+    private void AttachCaptureHandlers()
+    {
+        if (_captureHandlersAttached)
+        {
+            return;
+        }
+
+        capture.FrameCaptured += OnFrameCaptured;
+        capture.EndpointPeakChanged += OnEndpointPeak;
+        capture.Failed += OnDeviceFailed;
+        output.Failed += OnDeviceFailed;
+        _captureHandlersAttached = true;
+    }
+
+    private void DetachCaptureHandlers()
+    {
+        if (!_captureHandlersAttached)
+        {
+            return;
+        }
+
+        capture.FrameCaptured -= OnFrameCaptured;
+        capture.EndpointPeakChanged -= OnEndpointPeak;
+        capture.Failed -= OnDeviceFailed;
+        output.Failed -= OnDeviceFailed;
+        _captureHandlersAttached = false;
     }
 
     public void ApplySettings(AudioSettings settings)
@@ -444,22 +561,21 @@ public sealed class VoiceSession(
 
     private void OnFrameCaptured(object? sender, short[] frame)
     {
-        var encoder = _encoder;
-
-        if (encoder is null)
-        {
-            return;
-        }
-
         var open = _gate.Process(frame);
-        InputLevel = _gate.LastLevel;
-        InputLevelChanged?.Invoke(this, InputLevel);
+        PublishInputLevel(Math.Max(_gate.LastLevel, _endpointDisplay));
 
         var wantsToTalk = Settings.UsePushToTalk ? _pushToTalkPressed : open;
         var transmitting = wantsToTalk && !IsMuted;
-        IsTransmitting = transmitting;
 
-        if (!transmitting)
+        if (IsTransmitting != transmitting)
+        {
+            IsTransmitting = transmitting;
+            TransmittingChanged?.Invoke(this, transmitting);
+        }
+
+        var encoder = _encoder;
+
+        if (encoder is null || !transmitting)
         {
             return;
         }
@@ -486,6 +602,25 @@ public sealed class VoiceSession(
         {
             logger.LogDebug(ex, "Dropped a captured frame.");
         }
+    }
+
+    private void OnEndpointPeak(object? sender, float peak)
+    {
+        _endpointDisplay = peak <= 0.0001f
+            ? 0f
+            : VoiceActivityGate.ToDisplayLevel((float)(20 * Math.Log10(peak)));
+        PublishInputLevel(Math.Max(_gate.LastLevel, _endpointDisplay));
+    }
+
+    private void PublishInputLevel(float level)
+    {
+        if (Math.Abs(level - InputLevel) < 0.005f)
+        {
+            return;
+        }
+
+        InputLevel = level;
+        InputLevelChanged?.Invoke(this, InputLevel);
     }
 
     private void OnDeviceFailed(object? sender, Exception exception)

@@ -22,6 +22,8 @@ public sealed partial class MainViewModel : ObservableObject
     private ServerProfile? _profile;
     private AuthResult? _session;
     private Guid _clientId;
+    private bool _selfSpeakingShown;
+    private bool _isAttached;
 
     /// <summary>
     /// Selecting a channel starts a history load, but a property setter cannot be awaited.
@@ -60,6 +62,9 @@ public sealed partial class MainViewModel : ObservableObject
     [ObservableProperty]
     private ClientConnectionState _connectionState = ClientConnectionState.Disconnected;
 
+    [ObservableProperty]
+    private float _inputLevel;
+
     public MainViewModel(
         IWhisperConnection connection,
         IUiDispatcher ui,
@@ -74,7 +79,17 @@ public sealed partial class MainViewModel : ObservableObject
         _pushToTalk = pushToTalk;
 
         _pushToTalk.PressedChanged += (_, pressed) => _voice.SetPushToTalkPressed(pressed);
-        _voice.Failed += (_, ex) => _ui.Post(() => StatusMessage = $"Audio problem: {ex.Message}");
+        _voice.Failed += (_, ex) => _ui.Post(() =>
+        {
+            if (_isAttached)
+            {
+                StatusMessage = $"Audio problem: {ex.Message}";
+            }
+        });
+        _voice.TransmittingChanged += (_, transmitting) =>
+            QueueSelfSpeaking(transmitting && ActiveVoiceChannelId is not null && _isAttached);
+        _voice.InputLevelChanged += (_, level) =>
+            _ui.Post(() => InputLevel = level);
 
         _connection.MessageReceived += OnMessageReceived;
         _connection.MemberJoined += OnMemberJoined;
@@ -108,6 +123,7 @@ public sealed partial class MainViewModel : ObservableObject
         ConnectionState = _connection.State;
 
         _voice.ApplySettings(_profileStore.Load().Audio);
+        _isAttached = true;
 
         ApplyChannels(session.Channels);
 
@@ -117,6 +133,7 @@ public sealed partial class MainViewModel : ObservableObject
             Members.Add(new MemberViewModel(member));
         }
 
+        EnsureSelfInMemberList();
         RebuildVoiceOccupancy();
 
         Messages.Clear();
@@ -203,7 +220,9 @@ public sealed partial class MainViewModel : ObservableObject
 
         ActiveVoiceChannelId = channel.Id;
         ReflectOwnVoiceChannel(channel.Id);
-        StatusMessage = $"Joined {channel.Name}.";
+        StatusMessage = _voice.Settings.UsePushToTalk
+            ? $"Joined {channel.Name}. Hold Left Ctrl to talk."
+            : $"Joined {channel.Name}.";
     }
 
     [RelayCommand]
@@ -285,7 +304,11 @@ public sealed partial class MainViewModel : ObservableObject
             return false;
         }
 
-        var started = await _voice.StartAsync(relay, _session.VoiceToken, _session.Ssrc);
+        // Device open can take a moment and must not run on the UI thread — that is what
+        // made Join voice look frozen.
+        var started = await Task.Run(async () =>
+                await _voice.StartAsync(relay, _session.VoiceToken, _session.Ssrc).ConfigureAwait(false))
+            .ConfigureAwait(true);
 
         if (!started)
         {
@@ -348,21 +371,36 @@ public sealed partial class MainViewModel : ObservableObject
     [RelayCommand]
     private async Task DisconnectAsync()
     {
+        // Ignore hub callbacks before the connection is torn down. MemberLeft during
+        // dispose would otherwise mutate the occupant lists while WPF is swapping views.
+        _isAttached = false;
         _pushToTalk.Stop();
+        _selfSpeakingShown = false;
+        InputLevel = 0;
 
         try
         {
-            await _voice.StopAsync(releaseDevices: true);
+            // WASAPI stop/dispose is what used to crash the process. Leave the devices
+            // warm until the app exits, the same as leave-voice.
+            await _voice.StopAsync(releaseDevices: false);
         }
         catch (Exception ex)
         {
             StatusMessage = ex.Message;
         }
 
-        await _connection.DisconnectAsync();
+        try
+        {
+            await _connection.DisconnectAsync();
+        }
+        catch (Exception)
+        {
+            // Already gone.
+        }
+
         ActiveVoiceChannelId = null;
         ReflectOwnVoiceChannel(null);
-        Disconnected?.Invoke(this, EventArgs.Empty);
+        _ui.Post(() => Disconnected?.Invoke(this, EventArgs.Empty));
     }
 
     private async Task LoadHistoryAsync(DateTimeOffset? before)
@@ -423,6 +461,11 @@ public sealed partial class MainViewModel : ObservableObject
 
     private void OnMessageReceived(object? sender, ChatMessage message) => _ui.Post(() =>
     {
+        if (!_isAttached)
+        {
+            return;
+        }
+
         if (message.ChannelId != SelectedTextChannel?.Id || Messages.Any(m => m.Id == message.Id))
         {
             return;
@@ -433,6 +476,11 @@ public sealed partial class MainViewModel : ObservableObject
 
     private void OnMemberJoined(object? sender, MemberInfo member) => _ui.Post(() =>
     {
+        if (!_isAttached)
+        {
+            return;
+        }
+
         if (FindMember(member.ClientId) is { } existing)
         {
             existing.Update(member);
@@ -447,6 +495,11 @@ public sealed partial class MainViewModel : ObservableObject
 
     private void OnMemberLeft(object? sender, Guid clientId) => _ui.Post(() =>
     {
+        if (!_isAttached)
+        {
+            return;
+        }
+
         if (FindMember(clientId) is not { } member)
         {
             return;
@@ -459,6 +512,11 @@ public sealed partial class MainViewModel : ObservableObject
 
     private void OnMemberUpdated(object? sender, MemberInfo member) => _ui.Post(() =>
     {
+        if (!_isAttached)
+        {
+            return;
+        }
+
         if (FindMember(member.ClientId) is { } existing)
         {
             existing.Update(member);
@@ -473,6 +531,18 @@ public sealed partial class MainViewModel : ObservableObject
 
     private void OnSpeakingChanged(object? sender, SpeakingChange change) => _ui.Post(() =>
     {
+        if (!_isAttached)
+        {
+            return;
+        }
+
+        // Your own row is driven by the microphone. The server's speaking-decay is only
+        // 200 ms, which would otherwise blink your highlight off between words.
+        if (_session is not null && change.Ssrc == _session.Ssrc)
+        {
+            return;
+        }
+
         if (Members.FirstOrDefault(m => m.Ssrc == change.Ssrc) is { } member)
         {
             member.IsSpeaking = change.IsSpeaking;
@@ -480,12 +550,29 @@ public sealed partial class MainViewModel : ObservableObject
     });
 
     private void OnChannelsUpdated(object? sender, IReadOnlyList<ChannelInfo> channels) =>
-        _ui.Post(() => ApplyChannels(channels));
+        _ui.Post(() =>
+        {
+            if (_isAttached)
+            {
+                ApplyChannels(channels);
+            }
+        });
 
-    private void OnServerNotice(object? sender, string text) => _ui.Post(() => StatusMessage = text);
+    private void OnServerNotice(object? sender, string text) => _ui.Post(() =>
+    {
+        if (_isAttached)
+        {
+            StatusMessage = text;
+        }
+    });
 
     private void OnStateChanged(object? sender, ClientConnectionState state) => _ui.Post(() =>
     {
+        if (!_isAttached)
+        {
+            return;
+        }
+
         ConnectionState = state;
 
         StatusMessage = state switch
@@ -499,6 +586,58 @@ public sealed partial class MainViewModel : ObservableObject
 
     private MemberViewModel? FindMember(Guid clientId) =>
         Members.FirstOrDefault(m => m.ClientId == clientId);
+
+    private MemberViewModel? FindSelf() =>
+        Members.FirstOrDefault(m => m.IsSelf) ?? FindMember(_clientId);
+
+    private void QueueSelfSpeaking(bool speaking)
+    {
+        if (speaking == _selfSpeakingShown)
+        {
+            return;
+        }
+
+        _ui.Post(() => SetSelfSpeaking(speaking));
+    }
+
+    private void SetSelfSpeaking(bool speaking)
+    {
+        if (FindSelf() is not { } self)
+        {
+            return;
+        }
+
+        _selfSpeakingShown = speaking;
+
+        if (self.IsSpeaking != speaking)
+        {
+            self.IsSpeaking = speaking;
+        }
+    }
+
+    /// <summary>
+    /// Settings can toggle push-to-talk while already in a channel. The hint and the
+    /// key monitor have to follow without requiring a leave/rejoin.
+    /// </summary>
+    public void RefreshAudioPresentation()
+    {
+        OnPropertyChanged(nameof(ShowPushToTalkHint));
+
+        if (!_isAttached || ActiveVoiceChannelId is null || !_voice.Settings.UsePushToTalk)
+        {
+            _pushToTalk.Stop();
+            return;
+        }
+
+        _pushToTalk.VirtualKey = _voice.Settings.PushToTalkKey;
+        _pushToTalk.Start();
+    }
+
+    public bool ShowPushToTalkHint =>
+        ActiveVoiceChannelId is not null && _voice.Settings.UsePushToTalk;
+
+    partial void OnActiveVoiceChannelIdChanged(int? value) =>
+        OnPropertyChanged(nameof(ShowPushToTalkHint));
 
     /// <summary>
     /// Puts people under the voice channel they are actually in. Discord's sidebar is a
@@ -554,9 +693,45 @@ public sealed partial class MainViewModel : ObservableObject
     }
 
     /// <summary>
-    /// The hub's member list does not include the connecting client, so occupancy would
-    /// otherwise show everyone except you. Reflect join/leave locally; the broadcast that
-    /// follows just confirms it.
+    /// The hub's member snapshot omits the connecting client (everyone else already has
+    /// that row from MemberJoined). The CONNECTED list still needs you on it, or a solo
+    /// session looks empty.
+    /// </summary>
+    private void EnsureSelfInMemberList()
+    {
+        if (_profile is null || _session is null)
+        {
+            return;
+        }
+
+        if (FindMember(_clientId) is { } existing)
+        {
+            existing.IsSelf = true;
+            existing.Update(new MemberInfo(
+                _clientId,
+                _profile.DisplayName,
+                _session.Ssrc,
+                existing.VoiceChannelId,
+                IsMuted,
+                IsDeafened));
+            return;
+        }
+
+        Members.Insert(0, new MemberViewModel(new MemberInfo(
+            _clientId,
+            _profile.DisplayName,
+            _session.Ssrc,
+            null,
+            IsMuted,
+            IsDeafened))
+        {
+            IsSelf = true,
+        });
+    }
+
+    /// <summary>
+    /// Occupancy would otherwise show everyone except you, because the hub omits the
+    /// connecting client. Join and leave are reflected locally; the broadcast confirms it.
     /// </summary>
     private void ReflectOwnVoiceChannel(int? channelId)
     {
@@ -566,6 +741,7 @@ public sealed partial class MainViewModel : ObservableObject
             return;
         }
 
+        EnsureSelfInMemberList();
         var self = FindMember(_clientId);
 
         if (channelId is null)
@@ -579,18 +755,7 @@ public sealed partial class MainViewModel : ObservableObject
             return;
         }
 
-        if (self is null)
-        {
-            self = new MemberViewModel(new MemberInfo(
-                _clientId,
-                _profile.DisplayName,
-                _session.Ssrc,
-                channelId,
-                IsMuted,
-                IsDeafened));
-            Members.Add(self);
-        }
-        else
+        if (self is not null)
         {
             self.VoiceChannelId = channelId;
             self.IsMuted = IsMuted;

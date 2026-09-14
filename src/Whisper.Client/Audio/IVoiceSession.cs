@@ -24,6 +24,9 @@ public interface IVoiceSession : IAsyncDisposable
 
     event EventHandler<float>? InputLevelChanged;
 
+    /// <summary>Fired when the local user starts or stops sending voice.</summary>
+    event EventHandler<bool>? TransmittingChanged;
+
     event EventHandler<Exception>? Failed;
 
     Task<bool> StartAsync(
@@ -41,4 +44,16 @@ public interface IVoiceSession : IAsyncDisposable
     void ApplySettings(AudioSettings settings);
 
     void SetPushToTalkPressed(bool isPressed);
+
+    /// <summary>
+    /// Opens the microphone for the settings meter without joining a voice channel.
+    /// Safe to call while already in a call: the live capture is reused.
+    /// </summary>
+    Task StartInputMeterAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Stops raising meter levels for settings. The capture device stays warm if a
+    /// call is still active, or if leave-voice already left it open.
+    /// </summary>
+    Task StopInputMeterAsync();
 }

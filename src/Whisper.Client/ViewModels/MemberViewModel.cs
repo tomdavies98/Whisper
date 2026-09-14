@@ -31,7 +31,19 @@ public sealed partial class MemberViewModel : ObservableObject
 
     public uint Ssrc { get; private set; }
 
+    /// <summary>The local user. The hub never includes them in the member snapshot.</summary>
+    public bool IsSelf { get; set; }
+
     public bool IsInVoice => VoiceChannelId is not null;
+
+    public string Initials
+    {
+        get
+        {
+            var name = DisplayName.Trim();
+            return name.Length == 0 ? "?" : char.ToUpperInvariant(name[0]).ToString();
+        }
+    }
 
     public void Update(MemberInfo member)
     {
@@ -41,6 +53,8 @@ public sealed partial class MemberViewModel : ObservableObject
         IsMuted = member.IsMuted;
         IsDeafened = member.IsDeafened;
     }
+
+    partial void OnDisplayNameChanged(string value) => OnPropertyChanged(nameof(Initials));
 
     partial void OnVoiceChannelIdChanged(int? value)
     {

@@ -296,6 +296,88 @@ public class VoiceSessionTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task StartInputMeter_OpensTheMicrophoneWithoutJoiningVoice()
+    {
+        await _session.StartInputMeterAsync();
+
+        _capture.IsCapturing.Should().BeTrue();
+        _output.IsPlaying.Should().BeFalse();
+        _session.IsActive.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task StartInputMeter_RaisesTheInputLevelWhenYouSpeak()
+    {
+        await _session.StartInputMeterAsync();
+        var levels = new List<float>();
+        _session.InputLevelChanged += (_, level) => levels.Add(level);
+
+        await _capture.EmitAsync(AudioSignals.Sine());
+
+        levels.Should().NotBeEmpty();
+        levels[^1].Should().BeGreaterThan(0.5f);
+        _transport.AudioHeaders().Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task StartInputMeter_UsesTheConfiguredInputDevice()
+    {
+        _session.ApplySettings(new AudioSettings { InputDeviceId = "mic-1" });
+
+        await _session.StartInputMeterAsync();
+
+        _capture.StartedDeviceId.Should().Be("mic-1");
+    }
+
+    [Fact]
+    public async Task StartInputMeter_WhileAlreadyInACall_ReusesTheOpenMicrophone()
+    {
+        await StartAsync();
+
+        await _session.StartInputMeterAsync();
+
+        _capture.StartCount.Should().Be(1);
+        _session.IsActive.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task StopInputMeter_ThenCapture_DoesNotRaiseTheMeter()
+    {
+        await _session.StartInputMeterAsync();
+        await _session.StopInputMeterAsync();
+        var raised = false;
+        _session.InputLevelChanged += (_, _) => raised = true;
+
+        await _capture.EmitAsync(AudioSignals.Sine());
+
+        raised.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Start_AfterTheInputMeter_DoesNotRestartCapture()
+    {
+        await _session.StartInputMeterAsync();
+
+        (await StartAsync()).Should().BeTrue();
+
+        _capture.StartCount.Should().Be(1);
+        _output.StartCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task EndpointPeak_DrivesTheMeterWhenCapturePacketsAreQuiet()
+    {
+        await _session.StartInputMeterAsync();
+        var levels = new List<float>();
+        _session.InputLevelChanged += (_, level) => levels.Add(level);
+
+        _capture.RaiseEndpointPeak(0.4f);
+
+        levels.Should().NotBeEmpty();
+        levels[^1].Should().BeGreaterThan(0.5f);
+    }
+
+    [Fact]
     public async Task ApplySettings_WhileRunning_UpdatesTheJitterDepthForNewPeers()
     {
         await StartAsync();
@@ -479,6 +561,8 @@ internal sealed class FakeAudioCapture : IAudioCapture
 
     public event EventHandler<short[]>? FrameCaptured;
 
+    public event EventHandler<float>? EndpointPeakChanged;
+
     public event EventHandler<Exception>? Failed;
 
     public int StartCount { get; private set; }
@@ -507,6 +591,8 @@ internal sealed class FakeAudioCapture : IAudioCapture
     }
 
     public void RaiseFailed(Exception exception) => Failed?.Invoke(this, exception);
+
+    public void RaiseEndpointPeak(float peak) => EndpointPeakChanged?.Invoke(this, peak);
 }
 
 internal sealed class FakeAudioOutput : IAudioOutput

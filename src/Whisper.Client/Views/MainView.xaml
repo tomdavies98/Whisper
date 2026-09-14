@@ -8,6 +8,88 @@
              xmlns:viewModels="clr-namespace:Whisper.Client.ViewModels"
              d:DataContext="{d:DesignInstance Type=viewModels:MainViewModel}"
              mc:Ignorable="d">
+    <UserControl.Resources>
+        <DataTemplate x:Key="MemberRowTemplate" DataType="{x:Type viewModels:MemberViewModel}">
+            <Border Margin="0,2" CornerRadius="6" Padding="6,4">
+                <Border.Style>
+                    <Style TargetType="Border">
+                        <Setter Property="Background" Value="Transparent" />
+                        <Setter Property="BorderBrush" Value="Transparent" />
+                        <Setter Property="BorderThickness" Value="1" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsSpeaking}" Value="True">
+                                <Setter Property="Background" Value="#6622C55E" />
+                                <Setter Property="BorderBrush" Value="#FF22C55E" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Border.Style>
+
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <Grid Grid.Column="0" Width="28" Height="28" Margin="0,0,8,0">
+                        <Ellipse StrokeThickness="3">
+                            <Ellipse.Style>
+                                <Style TargetType="Ellipse">
+                                    <Setter Property="Fill" Value="{DynamicResource ControlFillColorSecondaryBrush}" />
+                                    <Setter Property="Stroke" Value="Transparent" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsSpeaking}" Value="True">
+                                            <Setter Property="Fill" Value="#4422C55E" />
+                                            <Setter Property="Stroke" Value="#FF22C55E" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Ellipse.Style>
+                        </Ellipse>
+                        <TextBlock HorizontalAlignment="Center"
+                                   VerticalAlignment="Center"
+                                   FontSize="12"
+                                   Text="{Binding Initials}" />
+                    </Grid>
+
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock Text="{Binding DisplayName}" TextTrimming="CharacterEllipsis">
+                            <TextBlock.Style>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="Foreground" Value="{DynamicResource TextFillColorPrimaryBrush}" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsSpeaking}" Value="True">
+                                            <Setter Property="Foreground" Value="#FF22C55E" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </TextBlock.Style>
+                        </TextBlock>
+                        <TextBlock FontSize="11"
+                                   Foreground="{DynamicResource TextFillColorSecondaryBrush}"
+                                   Text="you"
+                                   Visibility="{Binding IsSelf, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                        <ui:SymbolIcon Margin="4,0,0,0"
+                                       FontSize="14"
+                                       Symbol="Speaker224"
+                                       Visibility="{Binding IsInVoice, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <ui:SymbolIcon Margin="4,0,0,0"
+                                       FontSize="14"
+                                       Symbol="MicOff24"
+                                       Visibility="{Binding IsMuted, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                        <ui:SymbolIcon Margin="4,0,0,0"
+                                       FontSize="14"
+                                       Symbol="SpeakerOff24"
+                                       Visibility="{Binding IsDeafened, Converter={StaticResource BooleanToVisibilityConverter}}" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </DataTemplate>
+    </UserControl.Resources>
     <Grid>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="230" />
@@ -73,43 +155,9 @@
                                                Content="{Binding Name}"
                                                Icon="{ui:SymbolIcon Speaker224}" />
 
-                                    <ItemsControl Margin="22,0,8,0" ItemsSource="{Binding Occupants}">
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate DataType="{x:Type viewModels:MemberViewModel}">
-                                                <Grid Margin="0,3">
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="Auto" />
-                                                        <ColumnDefinition Width="*" />
-                                                        <ColumnDefinition Width="Auto" />
-                                                    </Grid.ColumnDefinitions>
-
-                                                    <Ellipse Grid.Column="0"
-                                                             Width="8"
-                                                             Height="8"
-                                                             Margin="0,0,8,0"
-                                                             VerticalAlignment="Center"
-                                                             Fill="{DynamicResource SystemFillColorSuccessBrush}"
-                                                             Visibility="{Binding IsSpeaking, Converter={StaticResource BooleanToVisibilityConverter}}" />
-
-                                                    <ui:TextBlock Grid.Column="1"
-                                                                  VerticalAlignment="Center"
-                                                                  Text="{Binding DisplayName}"
-                                                                  TextTrimming="CharacterEllipsis" />
-
-                                                    <StackPanel Grid.Column="2" Orientation="Horizontal">
-                                                        <ui:SymbolIcon Margin="4,0,0,0"
-                                                                       FontSize="14"
-                                                                       Symbol="MicOff24"
-                                                                       Visibility="{Binding IsMuted, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                                        <ui:SymbolIcon Margin="4,0,0,0"
-                                                                       FontSize="14"
-                                                                       Symbol="SpeakerOff24"
-                                                                       Visibility="{Binding IsDeafened, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                                    </StackPanel>
-                                                </Grid>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
+                                    <ItemsControl Margin="16,0,8,4"
+                                                  ItemTemplate="{StaticResource MemberRowTemplate}"
+                                                  ItemsSource="{Binding Occupants}" />
                                 </StackPanel>
                             </Border>
                         </DataTemplate>
@@ -153,12 +201,13 @@
                                 </Grid.ColumnDefinitions>
 
                                 <StackPanel Grid.Column="0" Margin="0,0,10,0" Orientation="Horizontal">
-                                    <ui:TextBlock FontTypography="BodyStrong" Text="{Binding SenderName}" />
-                                    <ui:TextBlock Margin="8,0,0,0"
-                                                  VerticalAlignment="Center"
+                                    <ui:TextBlock VerticalAlignment="Center"
                                                   FontTypography="Caption"
                                                   Foreground="{DynamicResource TextFillColorTertiaryBrush}"
                                                   Text="{Binding TimeLabel}" />
+                                    <ui:TextBlock Margin="8,0,0,0"
+                                                  FontTypography="BodyStrong"
+                                                  Text="{Binding SenderName}" />
                                 </StackPanel>
 
                                 <ui:TextBlock Grid.Column="1"
@@ -204,41 +253,7 @@
                               Foreground="{DynamicResource TextFillColorSecondaryBrush}"
                               Text="CONNECTED" />
 
-                <ItemsControl ItemsSource="{Binding Members}">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate DataType="{x:Type viewModels:MemberViewModel}">
-                            <Grid Margin="8,4">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="Auto" />
-                                </Grid.ColumnDefinitions>
-
-                                <Ellipse Grid.Column="0"
-                                         Width="8"
-                                         Height="8"
-                                         Margin="0,0,8,0"
-                                         VerticalAlignment="Center"
-                                         Fill="{DynamicResource SystemFillColorSuccessBrush}"
-                                         Visibility="{Binding IsSpeaking, Converter={StaticResource BooleanToVisibilityConverter}}" />
-
-                                <ui:TextBlock Grid.Column="1" Text="{Binding DisplayName}" />
-
-                                <StackPanel Grid.Column="2" Orientation="Horizontal">
-                                    <ui:SymbolIcon Margin="4,0,0,0"
-                                                   Symbol="Speaker224"
-                                                   Visibility="{Binding IsInVoice, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                    <ui:SymbolIcon Margin="4,0,0,0"
-                                                   Symbol="MicOff24"
-                                                   Visibility="{Binding IsMuted, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                    <ui:SymbolIcon Margin="4,0,0,0"
-                                                   Symbol="SpeakerOff24"
-                                                   Visibility="{Binding IsDeafened, Converter={StaticResource BooleanToVisibilityConverter}}" />
-                                </StackPanel>
-                            </Grid>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
+                <ItemsControl ItemTemplate="{StaticResource MemberRowTemplate}" ItemsSource="{Binding Members}" />
             </StackPanel>
         </ScrollViewer>
 
@@ -272,7 +287,25 @@
                               Text="{Binding StatusMessage}"
                               TextTrimming="CharacterEllipsis" />
 
-                <StackPanel Grid.Column="2" Orientation="Horizontal">
+                <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                    <StackPanel Width="120"
+                                Margin="0,0,12,0"
+                                VerticalAlignment="Center"
+                                Visibility="{Binding ActiveVoiceChannelId, Converter={StaticResource EmptyToVisibilityConverter}}">
+                        <ui:TextBlock FontSize="10"
+                                      Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                      Text="Mic" />
+                        <ProgressBar Height="6"
+                                     Maximum="1"
+                                     Minimum="0"
+                                     Value="{Binding InputLevel, Mode=OneWay}" />
+                    </StackPanel>
+                    <ui:TextBlock Margin="0,0,12,0"
+                                  VerticalAlignment="Center"
+                                  FontWeight="Bold"
+                                  Foreground="#FF22C55E"
+                                  Text="Hold Left Ctrl to talk"
+                                  Visibility="{Binding ShowPushToTalkHint, Converter={StaticResource BooleanToVisibilityConverter}}" />
                     <ui:Button Margin="0,0,8,0"
                                Appearance="Secondary"
                                Command="{Binding OpenSettingsCommand}"

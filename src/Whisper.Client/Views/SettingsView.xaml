@@ -45,11 +45,15 @@
                 <ui:Card Margin="0,0,0,12">
                     <StackPanel>
                         <ui:TextBlock Style="{StaticResource FieldLabelStyle}" Text="Input level" />
-                        <ProgressBar Height="8"
-                                     Margin="0,0,0,12"
+                        <ProgressBar Height="12"
+                                     Margin="0,0,0,4"
                                      Maximum="1"
                                      Minimum="0"
                                      Value="{Binding InputLevel, Mode=OneWay}" />
+                        <ui:TextBlock Margin="0,0,0,12"
+                                      FontTypography="Caption"
+                                      Foreground="{DynamicResource TextFillColorTertiaryBrush}"
+                                      Text="Speak to test this microphone. A shout should fill the bar; a whisper should barely move it. If the bar never moves, the selected microphone is muted or it is not the one you are talking into." />
 
                         <ui:ToggleSwitch Margin="0,0,0,12"
                                          Content="Use push to talk (left control)"

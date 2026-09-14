@@ -127,14 +127,53 @@ public class SettingsViewModelTests
     }
 
     [Fact]
-    public void Apply_WhileInACall_SaysDeviceChangesWaitForTheNextCall()
+    public void Apply_TellsYouToSpeakIntoTheMeter()
     {
         _viewModel.Load();
-        _voice.StartAsync(new System.Net.IPEndPoint(System.Net.IPAddress.Loopback, 5001), Guid.NewGuid(), 1);
 
         _viewModel.ApplyCommand.Execute(null);
 
-        _viewModel.StatusMessage.Should().Contain("next time you join");
+        _viewModel.StatusMessage.Should().Contain("Speak to test");
+    }
+
+    [Fact]
+    public async Task StartMeter_OpensTheMicrophoneForTheInputMeter()
+    {
+        _viewModel.Load();
+
+        await _viewModel.StartMeterAsync();
+
+        _voice.InputMeterStartCalls.Should().Be(1);
+        _voice.Settings.InputDeviceId.Should().Be(DefaultMic.Id);
+    }
+
+    [Fact]
+    public async Task ChangingTheMicrophone_RestartsTheInputMeterOnTheNewDevice()
+    {
+        _viewModel.Load();
+        await _viewModel.StartMeterAsync();
+
+        _viewModel.SelectedInputDevice = Headset;
+
+        _voice.InputMeterStartCalls.Should().Be(2);
+        _voice.Settings.InputDeviceId.Should().Be(Headset.Id);
+    }
+
+    [Fact]
+    public void ThresholdMeterPosition_SitsOnTheSameScaleAsTheInputBar()
+    {
+        _viewModel.VoiceActivityThresholdDb = -45f;
+
+        _viewModel.ThresholdMeterPosition.Should().BeApproximately(25f / 70f, 0.001f);
+        _viewModel.ShowThresholdMarker.Should().BeTrue();
+    }
+
+    [Fact]
+    public void ThresholdMarker_HidesWhenPushToTalkIsOn()
+    {
+        _viewModel.UsePushToTalk = true;
+
+        _viewModel.ShowThresholdMarker.Should().BeFalse();
     }
 
     [Fact]
@@ -167,5 +206,6 @@ public class SettingsViewModelTests
 
         closed.Should().BeTrue();
         _profileStore.Document.Audio.InputGain.Should().Be(2f);
+        _voice.InputMeterStopCalls.Should().Be(1);
     }
 }

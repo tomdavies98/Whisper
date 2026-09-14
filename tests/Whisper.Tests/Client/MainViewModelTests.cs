@@ -108,11 +108,22 @@ public class MainViewModelTests
     }
 
     [Fact]
-    public async Task Attach_PopulatesTheMemberList()
+    public async Task Attach_PopulatesTheMemberListIncludingYou()
     {
         await AttachAsync(Member("Ada"), Member("Grace"));
 
-        _viewModel.Members.Select(m => m.DisplayName).Should().Equal("Ada", "Grace");
+        _viewModel.Members.Select(m => m.DisplayName).Should().Equal("Me", "Ada", "Grace");
+        _viewModel.Members[0].IsSelf.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Attach_WhenYouAreTheOnlyPersonOnline_StillListsYou()
+    {
+        // The hub omits the connecting client, which used to leave CONNECTED blank.
+        await AttachAsync();
+
+        _viewModel.Members.Should().ContainSingle().Which.DisplayName.Should().Be("Me");
+        _viewModel.Members[0].IsSelf.Should().BeTrue();
     }
 
     [Fact]
@@ -256,7 +267,7 @@ public class MainViewModelTests
 
         _connection.RaiseMemberJoined(Member("Ada"));
 
-        _viewModel.Members.Should().ContainSingle().Which.DisplayName.Should().Be("Ada");
+        _viewModel.Members.Select(m => m.DisplayName).Should().Equal("Me", "Ada");
         _viewModel.StatusMessage.Should().Be("Ada joined.");
     }
 
@@ -268,7 +279,8 @@ public class MainViewModelTests
 
         _connection.RaiseMemberJoined(new MemberInfo(id, "Ada Lovelace", 11, null, false, false));
 
-        _viewModel.Members.Should().ContainSingle().Which.DisplayName.Should().Be("Ada Lovelace");
+        _viewModel.Members.Should().HaveCount(2);
+        _viewModel.Members.Single(m => m.DisplayName == "Ada Lovelace").Should().NotBeNull();
     }
 
     [Fact]
@@ -279,7 +291,7 @@ public class MainViewModelTests
 
         _connection.RaiseMemberLeft(id);
 
-        _viewModel.Members.Should().BeEmpty();
+        _viewModel.Members.Should().ContainSingle().Which.DisplayName.Should().Be("Me");
         _viewModel.StatusMessage.Should().Be("Ada left.");
     }
 
@@ -290,7 +302,7 @@ public class MainViewModelTests
 
         _connection.RaiseMemberLeft(Guid.NewGuid());
 
-        _viewModel.Members.Should().ContainSingle();
+        _viewModel.Members.Should().HaveCount(2);
     }
 
     [Fact]
@@ -301,7 +313,7 @@ public class MainViewModelTests
 
         _connection.RaiseMemberUpdated(new MemberInfo(id, "Ada", 10, Lobby.Id, true, false));
 
-        var member = _viewModel.Members.Single();
+        var member = _viewModel.Members.Single(m => m.DisplayName == "Ada");
         member.IsMuted.Should().BeTrue();
         member.VoiceChannelId.Should().Be(Lobby.Id);
         member.IsInVoice.Should().BeTrue();
@@ -327,7 +339,7 @@ public class MainViewModelTests
 
         _connection.RaiseMemberUpdated(new MemberInfo(id, "Ada", 42, null, false, false));
 
-        _viewModel.Members.Single().IsSpeaking.Should().BeFalse();
+        _viewModel.Members.Single(m => m.Ssrc == 42).IsSpeaking.Should().BeFalse();
     }
 
     [Fact]
@@ -399,6 +411,41 @@ public class MainViewModelTests
         _connection.RaiseSpeakingChanged(42, true);
 
         _viewModel.VoiceChannels.Single().Occupants.Single().IsSpeaking.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task LocalTransmission_LightsYourOwnRow()
+    {
+        await AttachAsync();
+        await _viewModel.JoinVoiceCommand.ExecuteAsync(Lobby);
+
+        _voice.RaiseTransmittingChanged(true);
+
+        _viewModel.Members.Single(m => m.IsSelf).IsSpeaking.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task MicrophoneLevel_Alone_DoesNotLightYourRow()
+    {
+        // The speaking ring follows the voice gate / push-to-talk, not the raw meter.
+        await AttachAsync();
+        await _viewModel.JoinVoiceCommand.ExecuteAsync(Lobby);
+
+        _voice.RaiseInputLevel(0.9f);
+
+        _viewModel.Members.Single(m => m.IsSelf).IsSpeaking.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task StoppingTransmission_ClearsYourSpeakingHighlight()
+    {
+        await AttachAsync();
+        await _viewModel.JoinVoiceCommand.ExecuteAsync(Lobby);
+        _voice.RaiseTransmittingChanged(true);
+
+        _voice.RaiseTransmittingChanged(false);
+
+        _viewModel.Members.Single(m => m.IsSelf).IsSpeaking.Should().BeFalse();
     }
 
     [Fact]
@@ -606,6 +653,30 @@ public class MainViewModelTests
 
         _voice.IsActive.Should().BeFalse();
         _viewModel.ActiveVoiceChannelId.Should().BeNull();
+        _voice.LastReleaseDevices.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task JoinVoice_WithPushToTalk_TellsYouWhichKeyToHold()
+    {
+        _profileStore.Document.Audio.UsePushToTalk = true;
+        await AttachAsync();
+
+        await _viewModel.JoinVoiceCommand.ExecuteAsync(Lobby);
+
+        _viewModel.ShowPushToTalkHint.Should().BeTrue();
+        _viewModel.StatusMessage.Should().Contain("Left Ctrl");
+    }
+
+    [Fact]
+    public async Task MicrophoneLevel_UpdatesTheStatusMeter()
+    {
+        await AttachAsync();
+        await _viewModel.JoinVoiceCommand.ExecuteAsync(Lobby);
+
+        _voice.RaiseInputLevel(0.6f);
+
+        _viewModel.InputLevel.Should().Be(0.6f);
     }
 
     [Fact]
