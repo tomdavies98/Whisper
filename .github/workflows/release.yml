@@ -1,0 +1,70 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing tag to rebuild (e.g. v1.0.0). Leave empty when triggered by a tag push.'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Need full history so generated release notes can walk commits since the previous tag.
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x'
+
+      - name: Resolve version
+        id: version
+        shell: pwsh
+        run: |
+          $version = if ("${{ github.event_name }}" -eq "workflow_dispatch" -and "${{ inputs.tag }}") {
+            "${{ inputs.tag }}"
+          } else {
+            $env:GITHUB_REF_NAME
+          }
+
+          if ($version -notmatch '^v\d+\.\d+\.\d+$') {
+            throw "Version '$version' must look like v1.0.0."
+          }
+
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Building release $version"
+
+      - name: Build, test, and publish
+        shell: pwsh
+        run: ./build.ps1 -Version "${{ steps.version.outputs.version }}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          name: Whisper ${{ steps.version.outputs.version }}
+          generate_release_notes: true
+          body: |
+            Self-contained Windows builds — no .NET SDK required.
+
+            1. Host: unzip `whisper-server-win-x64-*.zip`, run `whisper-server.exe`.
+            2. Players: unzip `whisper-client-win-x64-*.zip`, run `Whisper.exe`.
+            3. Off-LAN: forward **TCP 5000** (chat) and **UDP 5001** (voice) to the host.
+
+            See the README **Install** section for details. First run may show a SmartScreen warning (unsigned build): More info → Run anyway.
+          files: |
+            artifacts/whisper-server-win-x64-${{ steps.version.outputs.version }}.zip
+            artifacts/whisper-client-win-x64-${{ steps.version.outputs.version }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

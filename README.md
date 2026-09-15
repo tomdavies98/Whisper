@@ -10,6 +10,36 @@ Two parts:
   voice relay over UDP; everything persisted to a single SQLite file.
 - **`Whisper.exe`** — a Windows desktop client with saved server profiles.
 
+## Install
+
+Pre-built Windows zips are on the
+[Releases](https://github.com/tomdavies98/Whisper/releases) page. No .NET SDK required.
+
+1. **Host PC** — download `whisper-server-win-x64-*.zip`, unzip, then run:
+
+   ```powershell
+   .\whisper-server.exe --name "My Server" --password "something-long"
+   ```
+
+2. **Each player PC** — download `whisper-client-win-x64-*.zip`, unzip, and run `Whisper.exe`.
+
+3. Note the LAN or public IP from the server banner. If friends are off your network,
+   port-forward **TCP 5000** and **UDP 5001** to the host (see [Opening the ports](#opening-the-ports)).
+
+4. In the client, add a profile with that host, port `5000`, and the server password.
+
+Windows may show a SmartScreen warning on first run (builds are not code-signed). Choose
+**More info** → **Run anyway**.
+
+To cut a new release after merging to `main`:
+
+```powershell
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+GitHub Actions builds the zips and attaches them to the Release.
+
 ## Architecture
 
 Voice and chat travel over separate connections, because they want opposite things from the
@@ -182,6 +212,9 @@ dotnet test --filter "Category!=Integration"
 ```
 
 ## Release checklist
+
+Tag `vX.Y.Z` on `main` (for example `v1.0.0`) and push the tag — Actions builds the
+Release assets automatically.
 
 Automated tests cover the protocol and the logic, but not devices, routers, or real
 networks. Before calling a build good:

@@ -19,22 +19,30 @@
 .PARAMETER Runtime
     Target runtime identifier for the published binaries. Defaults to win-x64.
 
+.PARAMETER Version
+    Optional release label (e.g. v1.0.0). Appended to zip names and written into VERSION.txt
+    inside each package so an unzipped folder still shows which build it is.
+
 .EXAMPLE
     ./build.ps1
 .EXAMPLE
     ./build.ps1 -SkipIntegrationTests
+.EXAMPLE
+    ./build.ps1 -Version v1.0.0
 #>
 [CmdletBinding()]
 param(
     [string]$Configuration = 'Release',
     [switch]$SkipTests,
     [switch]$SkipIntegrationTests,
-    [string]$Runtime = 'win-x64'
+    [string]$Runtime = 'win-x64',
+    [string]$Version = ''
 )
 
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $artifacts = Join-Path $root 'artifacts'
+$versionSuffix = if ([string]::IsNullOrWhiteSpace($Version)) { '' } else { "-$Version" }
 
 function Invoke-Step {
     param([string]$Name, [scriptblock]$Action)
@@ -103,10 +111,18 @@ Invoke-Step "Publish client ($Runtime)" {
 }
 
 Invoke-Step 'Package' {
-    Compress-Archive -Path (Join-Path $artifacts 'server/*') `
-        -DestinationPath (Join-Path $artifacts "whisper-server-$Runtime.zip") -Force
-    Compress-Archive -Path (Join-Path $artifacts 'client/*') `
-        -DestinationPath (Join-Path $artifacts "whisper-client-$Runtime.zip") -Force
+    $serverDir = Join-Path $artifacts 'server'
+    $clientDir = Join-Path $artifacts 'client'
+
+    if (-not [string]::IsNullOrWhiteSpace($Version)) {
+        Set-Content -Path (Join-Path $serverDir 'VERSION.txt') -Value $Version
+        Set-Content -Path (Join-Path $clientDir 'VERSION.txt') -Value $Version
+    }
+
+    Compress-Archive -Path (Join-Path $serverDir '*') `
+        -DestinationPath (Join-Path $artifacts "whisper-server-$Runtime$versionSuffix.zip") -Force
+    Compress-Archive -Path (Join-Path $clientDir '*') `
+        -DestinationPath (Join-Path $artifacts "whisper-client-$Runtime$versionSuffix.zip") -Force
     $global:LASTEXITCODE = 0
 }
 
